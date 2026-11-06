@@ -1,0 +1,12 @@
+# Runtime
+customtkinter>=5.2.2,<6
+mss>=10.2
+numpy>=1.26,<3
+opencv-python>=4.10,<5
+Pillow>=10.4
+pyautogui>=0.9.54
+pydantic>=2.8,<3
+
+# Desenvolvimento e empacotamento
+pyinstaller>=6.10
+pytest>=8.3

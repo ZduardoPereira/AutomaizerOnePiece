@@ -1,0 +1,132 @@
+{
+  "capture": {
+    "fps": 3.0,
+    "window_poll_seconds": 2.0,
+    "capture_only_when_foreground": true,
+    "black_frame_threshold": 4.0,
+    "process_names": [
+      "FortniteClient-Win64-Shipping.exe"
+    ],
+    "window_titles": [
+      "Fortnite"
+    ]
+  },
+  "recognition": {
+    "fps": 2.0,
+    "confirm_frames": 2,
+    "unknown_grace_seconds": 8.0,
+    "working_height": 540,
+    "scales": [
+      1.0,
+      0.9,
+      1.1
+    ],
+    "threshold_floor": 0.62,
+    "threshold_ceiling": 0.97,
+    "screens": {
+      "MATCH_RESULT": {
+        "folder": "result",
+        "threshold": 0.75,
+        "min_matches": 2
+      },
+      "VICTORY": {
+        "folder": "victory",
+        "threshold": 0.75,
+        "min_matches": 1
+      },
+      "DEFEAT": {
+        "folder": "defeat",
+        "threshold": 0.75,
+        "min_matches": 2
+      },
+      "ELIMINATED": {
+        "folder": "eliminated",
+        "threshold": 0.75,
+        "min_matches": 1
+      },
+      "GAME_MENU": {
+        "folder": "menu",
+        "threshold": 0.85,
+        "min_matches": 2
+      },
+      "MATCHMAKING": {
+        "folder": "matchmaking",
+        "threshold": 0.75,
+        "min_matches": 1
+      },
+      "LOADING": {
+        "folder": "loading",
+        "threshold": 0.75,
+        "min_matches": 1
+      },
+      "LOBBY": {
+        "folder": "lobby",
+        "threshold": 0.75,
+        "min_matches": 1
+      },
+      "IN_MATCH": {
+        "folder": "in_match",
+        "threshold": 0.8,
+        "min_matches": 2
+      }
+    }
+  },
+  "squad": {
+    "confirm_frames": 2,
+    "missing_row_confirm_frames": 8,
+    "low_health_percent": 35,
+    "card_threshold": 0.75
+  },
+  "rewards": {
+    "reward_type": "event_token",
+    "folder": "rewards/event_token",
+    "icon_threshold": 0.7,
+    "name_threshold": 0.65,
+    "message_threshold": 0.75,
+    "candidate_threshold": 0.55,
+    "confirm_frames": 3,
+    "max_missed_frames": 2,
+    "scales": [
+      0.96,
+      1.0,
+      1.04,
+      1.08,
+      1.12,
+      1.16,
+      1.2,
+      1.24
+    ],
+    "search_region": [
+      0.12,
+      0.0,
+      0.88,
+      0.62
+    ],
+    "gold_gate": 0.025
+  },
+  "assistant": {
+    "enabled": true,
+    "press_escape": true,
+    "escape_delay_seconds": 3.0,
+    "menu_timeout_seconds": 6.0,
+    "button_threshold": 0.85,
+    "reminder_seconds": 20.0,
+    "max_reminders": 3,
+    "cursor_move_seconds": 0.2
+  },
+  "notifications": {
+    "file_enabled": true,
+    "webhook_url": "",
+    "webhook_secret": "",
+    "card_seconds": 6.0
+  },
+  "ui": {
+    "appearance_mode": "dark",
+    "preview_fps": 4.0
+  },
+  "logging": {
+    "level": "INFO",
+    "max_bytes": 2000000,
+    "backup_count": 5
+  }
+}
