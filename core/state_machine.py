@@ -80,12 +80,12 @@ class StateMachine:
             return None
         return self._enter(candidate, confidence, now)
 
-    def reset(self) -> Transition | None:
+    def reset(self, now: float = 0.0) -> Transition | None:
         """Volta ao estado inicial, por exemplo quando o jogo é fechado."""
         self._clear_pending()
         if self.state is GameState.UNKNOWN:
             return None
-        return self._enter(GameState.UNKNOWN, 0.0, 0.0)
+        return self._enter(GameState.UNKNOWN, 0.0, now)
 
     def _enter(self, state: GameState, confidence: float, now: float) -> Transition:
         transition = Transition(self.state, state, confidence)

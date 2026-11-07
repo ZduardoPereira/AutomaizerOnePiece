@@ -344,13 +344,14 @@ até 5 números cadastrados.
 2. Na página **Configuração da API** (API Setup), copie a identificação do número de teste (Phone number ID), cadastre
    o seu número no campo **Para** e confirme com o código que chega no WhatsApp.
 3. Copie o token da mesma página. Ele vale 24 horas e serve para testar. Para deixar ligado, crie um usuário do sistema
-   nas [configurações do negócio](https://business.facebook.com/settings/system-users), dê a ele o app e a conta do
-   WhatsApp e gere um token sem validade com as permissões `whatsapp_business_messaging` e
+   em **Usuários do sistema** (System users), nas [configurações do negócio](https://business.facebook.com/latest/settings),
+   dê a ele o app e a conta do WhatsApp e gere um token sem validade com as permissões `whatsapp_business_messaging` e
    `whatsapp_business_management`.
 4. Preencha a página **WhatsApp** e use **Enviar teste**.
 
 Fora de uma conversa aberta, a API só manda modelos aprovados. O padrão é o `hello_world`, em `en_US`, que toda conta
-nova já tem, e ele chega em inglês. Para uma mensagem em português, crie um modelo no WhatsApp Manager, como
+nova já tem, e ele chega em inglês. Para uma mensagem em português, crie um modelo no
+[WhatsApp Manager](https://business.facebook.com/latest/whatsapp_manager/message_templates), como
 `token_encontrado` em Português (BR), categoria Utilidade, com um texto sem variáveis, como "O AutomaizerOnePiece
 encontrou o token de recompensa.". Depois que ele for aprovado, troque o nome e o idioma (`pt_BR`) na página. O teste
 manda o mesmo modelo.

@@ -112,14 +112,11 @@ def _created_at(value: object) -> datetime:
         return datetime.now()
 
 
-def execute_triple_click() -> None:
-    """Executa 3 cliques esquerdos consecutivos do mouse."""
-    for i in range(3):
-        user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-        time.sleep(0.05)
-        user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-        if i < 2:
-            time.sleep(0.1)
+def execute_left_click() -> None:
+    """Executa um único clique esquerdo do mouse."""
+    user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+    time.sleep(0.05)
+    user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
 
 
 def press_key(vk_code: int, duration: float) -> None:
@@ -150,7 +147,7 @@ class ClickCounter:
 
         self._lock = threading.Lock()
         self._loaded = False
-        self._position: int | None = None  # None: o início da leitura ainda não foi definido
+        self._position: int | None = None
         self._total = 0
         self._ids: deque[str] = deque(maxlen=MAX_IDS)
         self._recent: deque[CountedClick] = deque(maxlen=RECENT_CLICKS)
@@ -159,6 +156,7 @@ class ClickCounter:
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._wasd_thread: threading.Thread | None = None
+        self._w_thread: threading.Thread | None = None
 
     @property
     def count(self) -> ClickCount:
@@ -166,37 +164,42 @@ class ClickCounter:
 
     @property
     def game_state(self) -> GameState:
-        return self._game_state()
+        if callable(self._game_state):
+            return self._game_state()
+        return self._game_state
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
             return
         self._stop_event.clear()
         
-        # Thread principal de monitoramento de notificações e cliques associados
         self._thread = threading.Thread(target=self._run, name="click-counter", daemon=True)
         self._thread.start()
 
-        # Thread secundária para a sequência aleatória de WASD / Espaço / Cliques / Tecla 1 (somente em IN_MATCH)
+        self._w_thread = threading.Thread(target=self._w_loop, name="w-persistent-loop", daemon=True)
+        self._w_thread.start()
+
         self._wasd_thread = threading.Thread(target=self._wasd_sequence_loop, name="wasd-random-actions", daemon=True)
         self._wasd_thread.start()
+        logger.info("ClickCounter e automações contínuas iniciadas com sucesso.")
 
     def stop(self, timeout: float = 5.0) -> None:
         self._stop_event.set()
-        thread = self._thread
-        if thread is not None:
-            thread.join(timeout)
+        if self._thread is not None:
+            self._thread.join(timeout)
         self._thread = None
         
-        wasd_thread = self._wasd_thread
-        if wasd_thread is not None:
-            wasd_thread.join(timeout)
+        if self._w_thread is not None:
+            self._w_thread.join(timeout)
+        self._w_thread = None
+
+        if self._wasd_thread is not None:
+            self._wasd_thread.join(timeout)
         self._wasd_thread = None
 
         self._poll_safely()
 
     def reset(self) -> None:
-        """Zera o total. A posição e os ids continuam, então nenhum clique antigo é contado de novo."""
         with self._lock:
             if not self._loaded:
                 return
@@ -206,7 +209,6 @@ class ClickCounter:
             self._publish()
 
     def poll(self) -> None:
-        """Um ciclo: lê as linhas completas novas, salva o estado e publica o total."""
         with self._lock:
             if not self._loaded and not self._load():
                 return
@@ -223,66 +225,55 @@ class ClickCounter:
             self._poll_safely()
             self._stop_event.wait(self._poll_seconds)
 
+    def _w_loop(self) -> None:
+        """Mantém o W pressionado por 30 segundos continuamente, ativo o tempo todo."""
+        while not self._stop_event.is_set():
+            logger.info("[W Loop] Pressionando W por 30 segundos (ativo continuamente).")
+            if self._clicar_de_verdade:
+                press_key(VK_W, 30.0)
+            self._stop_event.wait(2.0)
+
     def _wasd_sequence_loop(self) -> None:
-        """Gerencia as ações automáticas durante o estado IN_MATCH."""
-        keys = [VK_W, VK_A, VK_S, VK_D, VK_SPACE, "CLICK"]
+        """Gerencia A, S, D, Espaço, Tecla 1 e Cliques de forma contínua, sem depender de estado."""
+        keys = [VK_A, VK_S, VK_D, VK_SPACE, "CLICK", "CLICK", "CLICK"]
         
-        last_match_state = False
-        match_start_time = 0.0
+        loop_start_time = time.time()
         tecla_um_pressionada = False
 
         while not self._stop_event.is_set():
-            current_state = self.game_state
+            # A cada execução contínua, verifica se já passaram 120 segundos para apertar a tecla 1
+            if not tecla_um_pressionada and (time.time() - loop_start_time >= 120.0):
+                logger.info("[Auto Loop] 120 segundos atingidos. Pressionando a tecla 1.")
+                if self._clicar_de_verdade:
+                    press_key(VK_1, 0.3)
+                tecla_um_pressionada = True
 
-            if current_state == GameState.IN_MATCH:
-                # Detecta o exato momento em que entrou na partida para contar os 120 segundos
-                if not last_match_state:
-                    match_start_time = time.time()
-                    tecla_um_pressionada = False
-                    last_match_state = True
-                    logger.info("[Match Loop] Partida iniciada (IN_MATCH detectado). Contando 120s para a tecla 1.")
+            chosen_action = random.choice(keys)
 
-                # Verifica se já passaram 120 segundos desde o início da partida para apertar a tecla 1
-                if not tecla_um_pressionada and (time.time() - match_start_time >= 120.0):
-                    logger.info("[Match Loop] 120 segundos passados em IN_MATCH. Pressionando a tecla 1.")
+            try:
+                if chosen_action == "CLICK":
+                    logger.info("[Auto Loop] Executando clique esquerdo aleatório.")
                     if self._clicar_de_verdade:
-                        press_key(VK_1, 0.3)
-                    tecla_um_pressionada = True
-
-                # Executa a escolha aleatória entre W, A, S, D, Espaço ou Clique Triplo
-                chosen_action = random.choice(keys)
-
-                try:
-                    if chosen_action == "CLICK":
-                        logger.info("[Match Loop] Executando triplo clique esquerdo aleatório em IN_MATCH.")
-                        if self._clicar_de_verdade:
-                            execute_triple_click()
+                        execute_left_click()
+                else:
+                    if chosen_action == VK_S:
+                        duration = 5.0
+                        key_name = 'S (5s)'
+                    elif chosen_action in (VK_A, VK_D):
+                        duration = 15.0
+                        key_name = {VK_A: 'A', VK_D: 'D'}.get(chosen_action) + ' (15s)'
                     else:
-                        # Define a duração conforme a tecla escolhida (W = 30s, A/S/D/Espaço = 15s ou aleatório curto para espaço)
-                        if chosen_action == VK_W:
-                            duration = 30.0
-                            key_name = 'W (30s)'
-                        elif chosen_action in (VK_A, VK_S, VK_D):
-                            duration = 15.0
-                            key_name = {VK_A: 'A', VK_S: 'S', VK_D: 'D'}.get(chosen_action) + ' (15s)'
-                        else:  # VK_SPACE
-                            duration = 1.0  # Espaço por um toque rápido ou ajuste desejado
-                            key_name = 'ESPAÇO'
+                        duration = 1.0
+                        key_name = 'ESPAÇO'
 
-                        logger.info("[Match Loop] Pressionando tecla %s em IN_MATCH.", key_name)
-                        if self._clicar_de_verdade:
-                            press_key(chosen_action, duration)
-                except Exception:
-                    logger.exception("Erro ao executar ação aleatória em IN_MATCH.")
+                    logger.info("[Auto Loop] Pressionando tecla %s.", key_name)
+                    if self._clicar_de_verdade:
+                        press_key(chosen_action, duration)
+            except Exception:
+                logger.exception("Erro ao executar ação aleatória contínua.")
 
-                # Pequeno intervalo aleatório entre os ciclos de ações
-                sleep_time = random.uniform(2.0, 5.0)
-                self._stop_event.wait(sleep_time)
-            else:
-                if last_match_state:
-                    logger.info("[Match Loop] Estado IN_MATCH encerrado.")
-                last_match_state = False
-                self._stop_event.wait(1.0)
+            sleep_time = random.uniform(1.5, 3.5)
+            self._stop_event.wait(sleep_time)
 
     def _poll_safely(self) -> None:
         try:
@@ -303,13 +294,12 @@ class ClickCounter:
         return True
 
     def _find_start(self) -> None:
-        """Na primeira execução, ou com outro arquivo, os cliques que já estavam nele não contam."""
         try:
             self._position = _end_of_last_complete_line(self._path)
         except FileNotFoundError:
             self._position = 0
         except OSError:
-            return  # Travado: a posição continua indefinida e é buscada no próximo ciclo.
+            return
         self._dirty = True
         logger.info("Contador de cliques: primeira leitura de %s, a partir do byte %d", self._path, self._position)
 
@@ -324,7 +314,7 @@ class ClickCounter:
                 file.seek(self._position)
                 data = file.read()
         except OSError:
-            return  # Inexistente ou travado: tenta de novo no próximo ciclo.
+            return
 
         last_newline = data.rfind(b"\n")
         if last_newline < 0:
@@ -360,34 +350,31 @@ class ClickCounter:
         self._recent.appendleft(CountedClick(message, button, created_at))
         logger.info("Notificação contada: %s", message)
 
-        # Dispara a lógica do triplo clique após a notificação chegar
         self._handle_notification_click(created_at)
 
     def _handle_notification_click(self, created_at: datetime) -> None:
-        # Valida a idade máxima da notificação
         now = datetime.now(created_at.tzinfo) if created_at.tzinfo else datetime.now()
         age = (now - created_at).total_seconds()
         if age > self._idade_maxima:
-            logger.info("Notificação muito antiga (%.1f s). Ignorando triplo clique automático.", age)
+            logger.info("Notificação muito antiga (%.1f s). Ignorando clique automático.", age)
             return
 
-        # Aguarda o tempo configurado (ex: 2 segundos) antes de clicar
         if self._espera_clique > 0:
-            logger.info("Aguardando %.1f segundos para efetuar o triplo clique da notificação...", self._espera_clique)
+            logger.info("Aguardando %.1f segundos para efetuar o clique da notificação...", self._espera_clique)
             time.sleep(self._espera_clique)
 
         if self._clicar_de_verdade:
-            logger.info("Executando triplo clique esquerdo após notificação.")
-            execute_triple_click()
+            logger.info("Executando clique esquerdo após notificação.")
+            execute_left_click()
         else:
-            logger.info("[Simulação] Triplo clique da notificação ignorado (clicar_de_verdade = False).")
+            logger.info("[Simulação] Clique da notificação ignorado (clicar_de_verdade = False).")
 
     def _save(self) -> None:
         state = {"path": str(self._path), "position": self._position, "total_ticks": self._total, "ids": list(self._ids)}
         try:
             _write_state(self._state_path, state)
         except OSError:
-            return  # Continua pendente e é salvo no próximo ciclo.
+            return
         self._dirty = False
 
     def _publish(self) -> None:
