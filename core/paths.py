@@ -18,5 +18,7 @@ FEEDBACK_DIR = DATA_DIR / "feedback"
 REWARDS_DIR = DATA_DIR / "rewards"
 DATABASE_PATH = DATA_DIR / "monitor.db"
 NOTIFICATIONS_PATH = DATA_DIR / "notifications.jsonl"
+CLICK_COUNTER_PATH = DATA_DIR / "click_counter.json"
+WHATSAPP_PATH = DATA_DIR / "whatsapp.json"  # fora do config.json, que vai para o git: tem o número e as chaves
 ASSETS_DIR = RESOURCE_DIR / "assets"
 TEMPLATES_DIR = ASSETS_DIR / "templates"

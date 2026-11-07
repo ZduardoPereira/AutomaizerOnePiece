@@ -48,6 +48,7 @@ versão, pois mostram nomes de outros jogadores; sem eles, esses testes são ign
 | `VICTORY` | Vitória | `victory/` |
 | `DEFEAT` | Derrota definitiva: tela "Sua colocação" | `defeat/` |
 | `MATCH_RESULT` | Resultado da partida | `result/` |
+| `REWARD_CLAIM` | Recompensa para resgatar: tarefa concluída, passe de batalha, tesouro e outras | `reward_claim/` |
 | `UNKNOWN` | Tela desconhecida | — |
 
 Cada recorte é procurado no quadro inteiro, em tons de cinza, por correlação normalizada (OpenCV). O quadro
@@ -178,7 +179,7 @@ o token. O registro pode ser apagado na mesma página, para um token novo ou ap�
 ### Encerramento
 
 Quando o token é confirmado, `token_obtained` é gravado e a partida atual continua sendo acompanhada, sem sugerir novas
-partidas. Quando ela termina, `shutdown_pending` é gravado, o monitoramento para, `monitor_stopped` é gravado e aparece
+partidas. Nesse momento sai também a mensagem no WhatsApp, se o aviso estiver ligado. Quando ela termina, `shutdown_pending` é gravado, o monitoramento para, `monitor_stopped` é gravado e aparece
 a notificação **RECOMPENSA OBTIDA! Monitoramento finalizado.** O estado fica no banco: se o aplicativo for fechado em
 qualquer um desses pontos, ele retoma dali ao abrir, e o monitoramento não pode ser iniciado até o registro ser apagado
 em **Recompensas > Apagar registro do token**.
@@ -206,8 +207,22 @@ clique é sempre do usuário, percebido pela mudança da tela.
 | O usuário abre o menu durante a partida, inclusive assistindo a um colega | Aba de configurações, **Voltar ao Lobby**, **Jogar** |
 | Só resta o usuário no esquadrão (`LAST_SQUAD_MEMBER_ALIVE`) | Abrir o menu, aba de configurações, **Voltar ao Lobby**, **Jogar** |
 | A partida termina, em vitória ou derrota | **Jogar novamente** |
+| Uma tela de recompensa aparece, inclusive sobre o lobby | **Resgatar**, ou **Resgatar tudo** com mais de uma recompensa |
 
 Com colegas apenas caídos (`LAST_SQUAD_MEMBER_STANDING`), a saída não começa, pois eles ainda podem ser levantados.
+
+### Recompensas
+
+A tela de recompensa é reconhecida pelos botões, pois o título e o fundo mudam com a origem dela. O jogo só mostra
+**Resgatar tudo** com mais de uma recompensa, então ele é procurado primeiro; sem ele, o cursor vai até **Resgatar**. O
+aviso aparece acima do botão, pois ao lado ficaria sobre o texto dele ou sobre **Equipar**.
+
+O clique é percebido quando a tela muda: o lobby aparece, o botão some por 3 análises seguidas, como na animação entre
+uma recompensa e a seguinte, ou outro botão de resgatar aparece em outro lugar. A cada nova recompensa, o cursor vai de
+novo até o botão. Depois da última, o passo seguinte é **Jogar**.
+
+Os recortes vêm de prints da tela real: **Resgatar** com o fundo azul de uma tarefa e **Resgatar tudo** com o rosa do passe.
+A comparação é em tons de cinza, e eles valem também para o botão creme do tesouro.
 
 Regras que valem em todos os passos:
 
@@ -261,14 +276,98 @@ aparece, e uma para cada clique feito. Ele só cresce, e é criado no primeiro r
 | `reward_obtained` | Notificação de token obtido e monitoramento finalizado |
 | `click_done` | O usuário deu o clique pedido, percebido pela mudança da tela. Não é uma notificação |
 
-`button` traz `MENU_TAB`, `LEAVE_MATCH`, `PLAY` ou `PLAY_AGAIN` em `click_required` e `click_done`, e `null` nos demais.
+`button` traz `MENU_TAB`, `LEAVE_MATCH`, `PLAY`, `PLAY_AGAIN`, `CLAIM` ou `CLAIM_ALL` em `click_required` e `click_done`, e
+`null` nos demais.
 
 Para contar as notificações, conte as linhas `click_required`, `info` e `reward_obtained`. Um clique que o aplicativo não
 pediu, como **Retornar ao lobby**, não é registrado.
 
+O próprio aplicativo já conta os cliques feitos na página **Cliques**, descrita a seguir.
+
 Para um programa fora deste PC, preencha o webhook em **Configurações > Notificações**: cada registro é enviado por POST,
 com o mesmo JSON no corpo e a senha no cabeçalho `X-Automaizer-Secret`, se houver. O envio roda em uma thread própria, com
 3 tentativas, e nunca atrasa a análise do jogo. Se todas falharem, o registro não é reenviado depois.
+
+## Contador de cliques
+
+Integrado do Projeto click no mouse, que deixa de ser necessário. A página **Cliques**, no menu lateral, mostra o total,
+o último clique e os cliques contados desde que o app abriu, com o botão **Zerar contagem**.
+
+Cada linha `click_done` em `data/notifications.jsonl` soma 1, uma vez por `id`: são os cliques que o assistente pediu e
+o usuário deu. Pedidos de clique, lembretes e avisos não contam. O contador fica à parte do resto do aplicativo, em
+`click_counter/`: ele só lê esse arquivo, em uma thread própria, sempre que o app está aberto, monitorando ou não. Com
+**Configurações > Notificações > Gravar em arquivo** desligado, nada novo é contado, e a página avisa.
+
+O estado fica em `data/click_counter.json`, no mesmo formato do `state.json` do projeto original: caminho do arquivo,
+posição de leitura, total e os últimos 1000 ids. Copiar aquele `state.json` para cá continua a contagem dele.
+
+- Na primeira execução, ou se o arquivo de notificações mudar de lugar, a leitura começa do fim dele.
+- Zerar não muda a posição de leitura nem os ids guardados, então nenhum clique antigo é contado de novo.
+- Uma linha ainda sendo escrita espera o fim dela; arquivo travado pelo OneDrive é lido no ciclo seguinte.
+- Um estado ilegível é guardado como `click_counter.danificado-<data>.json`, e a contagem recomeça do zero.
+
+## Aviso no WhatsApp
+
+Quando o token é encontrado, o app manda uma mensagem no seu WhatsApp. A página **WhatsApp**, no menu lateral, tem a
+chave **Avisar no WhatsApp quando o token for encontrado**, o serviço, o seu número com `+` e o código do país, como
+`+55 11 91234-5678`, e o botão **Enviar teste**, que salva e manda uma mensagem na hora. A página mostra o resultado do
+último envio, que também aparece nos eventos.
+
+A mensagem sai uma vez por token, quando ele é confirmado. Reabrir o app não a manda de novo, e um token novo só avisa
+depois de **Recompensas > Apagar registro do token**. O envio roda em uma thread própria, com 3 tentativas se não houver
+internet ou se o serviço estiver fora do ar; uma chave ou um token errado não é tentado de novo.
+
+O número, a chave e o token ficam em `data/whatsapp.json`, fora do `config.json`, que vai para o git. Em outro PC,
+preencha a página de novo. O código fica à parte, em `whatsapp/`, e só recebe o aviso do token.
+
+### CallMeBot
+
+Grátis para uso pessoal e o mais simples: só o número e uma chave. Ele só manda mensagens para o número que pediu a
+chave.
+
+1. Abra a [página do CallMeBot](https://www.callmebot.com/blog/free-api-whatsapp-messages/) e salve nos contatos o
+   número do bot que aparece lá.
+2. Do seu WhatsApp, mande para esse contato: `I allow callmebot to send me messages`.
+3. A resposta traz `Your APIKEY is ...`: coloque a chave na página **WhatsApp** e use **Enviar teste**.
+
+É um serviço pequeno, de uma pessoa só. Em novembro de 2026 a página dizia que o bot estava cheio, sem vagas para
+números novos, e há relatos de mensagens que pararam de chegar por um tempo. Se a chave não chegar em 2 minutos, o
+próprio CallMeBot diz para tentar de novo depois de 24 horas.
+
+### API oficial do WhatsApp (Meta)
+
+Dá mais trabalho, mas é o serviço oficial. O número de teste que a Meta cria não pede forma de pagamento e manda para
+até 5 números cadastrados.
+
+1. Em [Meta for Developers](https://developers.facebook.com/apps), crie um app com o caso de uso do WhatsApp e siga o
+   [guia de início](https://developers.facebook.com/documentation/business-messaging/whatsapp/get-started).
+2. Na página **Configuração da API** (API Setup), copie a identificação do número de teste (Phone number ID), cadastre
+   o seu número no campo **Para** e confirme com o código que chega no WhatsApp.
+3. Copie o token da mesma página. Ele vale 24 horas e serve para testar. Para deixar ligado, crie um usuário do sistema
+   nas [configurações do negócio](https://business.facebook.com/settings/system-users), dê a ele o app e a conta do
+   WhatsApp e gere um token sem validade com as permissões `whatsapp_business_messaging` e
+   `whatsapp_business_management`.
+4. Preencha a página **WhatsApp** e use **Enviar teste**.
+
+Fora de uma conversa aberta, a API só manda modelos aprovados. O padrão é o `hello_world`, em `en_US`, que toda conta
+nova já tem, e ele chega em inglês. Para uma mensagem em português, crie um modelo no WhatsApp Manager, como
+`token_encontrado` em Português (BR), categoria Utilidade, com um texto sem variáveis, como "O AutomaizerOnePiece
+encontrou o token de recompensa.". Depois que ele for aprovado, troque o nome e o idioma (`pt_BR`) na página. O teste
+manda o mesmo modelo.
+
+### Quando a mensagem não chega
+
+| Na página | O que fazer |
+| --- | --- |
+| A chave não confere com o número | Confira os dois: a chave vale só para o número que a pediu |
+| O token expirou ou está errado | Gere outro; o da Configuração da API vale 24 horas |
+| O seu número não está na lista do número de teste | Cadastre-o no campo **Para** da Configuração da API |
+| Não há modelo aprovado com esse nome nesse idioma | Confira o nome e o idioma do modelo no WhatsApp Manager |
+| Sem resposta do serviço | Sem internet ou serviço fora do ar, depois de 3 tentativas |
+| Enviada, mas não chegou | O serviço aceitou a mensagem e falhou depois. No CallMeBot, mande `Resume` para o bot: é o que ele recomenda quando para de entregar |
+
+Com número do Brasil, se tudo parecer certo e mesmo assim falhar, tente o número sem o 9 depois do DDD: algumas contas
+do WhatsApp usam esse formato.
 
 ## Histórico
 
@@ -305,7 +404,7 @@ e um novo é criado; nesse caso, o registro do token e o histórico recomeçam v
 
 O arquivo `config.json` pode ser editado na página **Configurações** ou diretamente; alterações diretas valem
 ao reiniciar. Um arquivo inválido é preservado como `config.json.invalid-<data>` e os valores padrão são
-restaurados.
+restaurados. O aviso no WhatsApp tem configuração à parte, em `data/whatsapp.json`.
 
 | Chave | Descrição |
 | --- | --- |
@@ -383,6 +482,10 @@ assistant/
   user_confirmation.py      Espera pelo clique e lembretes
   notifier.py               Notificação do Windows com som
   notification_outbox.py    Arquivo e webhook que contam a outros programas os cliques já feitos
+click_counter/
+  counter.py                Contador de cliques, integrado do Projeto click no mouse; só lê notifications.jsonl
+whatsapp/
+  notifier.py               Aviso do token no WhatsApp, pelo CallMeBot ou pela API oficial da Meta
 database/
   database.py               Conexão com o SQLite e criação das tabelas
   models.py                 Registros guardados no banco
@@ -398,6 +501,8 @@ ui/
   guidance_overlay.py       Avisos sobre o jogo: ao lado do botão e cartão de notificação
   settings.py               Edição validada das configurações
   history.py                Partidas anteriores, integrantes e eventos
+  click_counter.py          Página Cliques: total, último clique e zerar contagem
+  whatsapp.py               Página WhatsApp: serviço, número, teste e resultado do último envio
   theme.py, widgets.py, formatting.py    Identidade visual e componentes
 assets/templates/           Recortes de referência de cada tela
 tests/                      Testes unitários e de reconhecimento

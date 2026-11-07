@@ -58,6 +58,8 @@ def _default_screens() -> dict[GameState, ScreenRule]:
         GameState.GAME_MENU: ScreenRule(folder="menu", threshold=0.85, min_matches=2),
         GameState.MATCHMAKING: ScreenRule(folder="matchmaking"),
         GameState.LOADING: ScreenRule(folder="loading"),
+        # Os botões Resgatar e Resgatar tudo: o título e o fundo mudam com a origem da recompensa.
+        GameState.REWARD_CLAIM: ScreenRule(folder="reward_claim", threshold=0.80),
         GameState.LOBBY: ScreenRule(folder="lobby"),
         # Os ícones da partida são pequenos e por isso se parecem mais com outras regiões do quadro.
         GameState.IN_MATCH: ScreenRule(folder="in_match", threshold=0.80, min_matches=2),

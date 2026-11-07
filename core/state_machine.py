@@ -17,6 +17,7 @@ class GameState(str, Enum):
     VICTORY = "VICTORY"
     DEFEAT = "DEFEAT"
     MATCH_RESULT = "MATCH_RESULT"
+    REWARD_CLAIM = "REWARD_CLAIM"
 
 
 GAME_STATE_LABELS = {
@@ -30,6 +31,7 @@ GAME_STATE_LABELS = {
     GameState.VICTORY: "Vitória",
     GameState.DEFEAT: "Derrota",
     GameState.MATCH_RESULT: "Resultado da partida",
+    GameState.REWARD_CLAIM: "Recompensa para resgatar",
 }
 
 

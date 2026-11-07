@@ -47,6 +47,9 @@ EXPECTED = {
     "real_matchmaking": S.MATCHMAKING,
     "real_in_match_warmup": S.IN_MATCH,
     "real_eliminated_spectator": S.ELIMINATED,
+    "reward_claim_treasure": S.REWARD_CLAIM,
+    "reward_claim_quest": S.REWARD_CLAIM,
+    "reward_claim_battle_pass": S.REWARD_CLAIM,
 }
 
 pytestmark = pytest.mark.skipif(
@@ -207,6 +210,8 @@ def test_full_session_in_game_order(frames):
         "loading_connecting",
         "in_match_warmup",
         "eliminated_spectator",
+        "reward_claim_quest",
+        "reward_claim_battle_pass",
         "lobby_idle",
         "matchmaking_lobby",
         "loading_connecting",
@@ -240,6 +245,7 @@ def test_full_session_in_game_order(frames):
         S.LOADING,
         S.IN_MATCH,
         S.ELIMINATED,
+        S.REWARD_CLAIM,
         S.LOBBY,
         S.MATCHMAKING,
         S.LOADING,

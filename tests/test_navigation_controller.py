@@ -279,26 +279,36 @@ def test_move_uses_pyautogui_without_extra_pause(monkeypatch):
 
 @pytest.mark.parametrize(
     ("side", "expected"),
-    [("left", (1000 - 200 - 84, 500 - 20)), ("right", (1000 + 84, 500 - 20)), ("below", (1000 - 100, 500 + 28))],
+    [
+        ("left", (1000 - 200 - 84, 500 - 20)),
+        ("right", (1000 + 84, 500 - 20)),
+        ("below", (1000 - 100, 500 + 28)),
+        ("above", (1000 - 100, 500 - 40 - 28)),
+    ],
 )
 def test_hint_stays_beside_the_button(side, expected):
     assert hint_position(GuidanceHint("x", 1000, 500, side), 200, 40) == expected
 
 
 def test_missing_button_templates_are_reported(tmp_path):
-    assert len(ButtonLocator(tmp_path, 0.85, 540).warnings) == 4
+    assert len(ButtonLocator(tmp_path, 0.85, 540).warnings) == 6
     assert ButtonLocator(TEMPLATES_DIR, 0.85, 540).warnings == []
     assert ButtonLocator(tmp_path, 0.85, 540).locate(FRAME, B.PLAY) is None
 
 
 EXPECTED_BUTTONS = {
-    B.MENU_TAB: ("eliminated_spectator_social_panel", (1678, 71)),
-    B.LEAVE_MATCH: ("eliminated_spectator_menu_panel", (1562, 174)),
-    B.PLAY: ("lobby_idle", (260, 913)),
-    B.PLAY_AGAIN: ("result_victory", (1580, 653)),
+    B.MENU_TAB: {"eliminated_spectator_social_panel": (1678, 71)},
+    B.LEAVE_MATCH: {"eliminated_spectator_menu_panel": (1562, 174)},
+    B.PLAY: {"lobby_idle": (260, 913)},
+    B.PLAY_AGAIN: {"result_victory": (1580, 653)},
+    # Sem Equipar, Resgatar fica no centro; com ele, à direita. Com mais de uma recompensa, o jogo mostra Resgatar tudo.
+    B.CLAIM: {"reward_claim_treasure": (960, 986), "reward_claim_quest": (1128, 986)},
+    B.CLAIM_ALL: {"reward_claim_battle_pass": (1128, 986)},
 }
+BUTTON_PRINTS = [(button, name) for button, prints in EXPECTED_BUTTONS.items() for name in prints]
 needs_prints = pytest.mark.skipif(
-    not (SCREENS_DIR / "lobby_idle.png").exists(), reason="Prints do jogo indisponíveis em tests/fixtures/screens"
+    not all((SCREENS_DIR / f"{name}.png").exists() for _button, name in BUTTON_PRINTS),
+    reason="Prints do jogo indisponíveis em tests/fixtures/screens",
 )
 
 
@@ -308,9 +318,9 @@ def locator():
 
 
 @needs_prints
-@pytest.mark.parametrize("button", EXPECTED_BUTTONS)
-def test_finds_each_button_where_the_game_shows_it(locator, button):
-    name, (x, y) = EXPECTED_BUTTONS[button]
+@pytest.mark.parametrize(("button", "name"), BUTTON_PRINTS)
+def test_finds_each_button_where_the_game_shows_it(locator, button, name):
+    x, y = EXPECTED_BUTTONS[button][name]
     match = locator.locate(read_image(SCREENS_DIR / f"{name}.png"), button)
     assert match is not None
     assert abs(match.center_x - x) <= 4
@@ -318,10 +328,10 @@ def test_finds_each_button_where_the_game_shows_it(locator, button):
 
 
 @needs_prints
-@pytest.mark.parametrize("button", EXPECTED_BUTTONS)
+@pytest.mark.parametrize(("button", "name"), BUTTON_PRINTS)
 @pytest.mark.parametrize("size", [(1280, 720), (2560, 1440)], ids=["720p", "1440p"])
-def test_finds_buttons_in_other_resolutions(locator, button, size):
-    name, (x, y) = EXPECTED_BUTTONS[button]
+def test_finds_buttons_in_other_resolutions(locator, button, name, size):
+    x, y = EXPECTED_BUTTONS[button][name]
     frame = read_image(SCREENS_DIR / f"{name}.png")
     interpolation = cv2.INTER_AREA if size[1] < 1080 else cv2.INTER_CUBIC
     match = locator.locate(cv2.resize(frame, size, interpolation=interpolation), button)
@@ -333,9 +343,8 @@ def test_finds_buttons_in_other_resolutions(locator, button, size):
 @needs_prints
 @pytest.mark.parametrize("button", EXPECTED_BUTTONS)
 def test_buttons_are_not_found_on_other_screens(locator, button):
-    source = EXPECTED_BUTTONS[button][0]
     for path in SCREENS_DIR.glob("*.png"):
-        if path.stem != source:
+        if path.stem not in EXPECTED_BUTTONS[button]:
             assert locator.locate(read_image(path), button) is None, path.stem
 
 
@@ -392,3 +401,22 @@ def test_failed_escape_notice_also_goes_to_the_outbox(harness):
 
     assert outbox_of(controller)[-1] == ("info", "Não consegui abrir o menu. Aperte Esc.", None)
     assert written_notifications(controller) == notifications(events)
+
+
+def test_reward_screen_moves_to_claim_all_and_writes_the_request(harness):
+    controller, events, locator, mouse = harness
+    controller.activate()
+    locator.visible = {
+        B.CLAIM: ButtonMatch(B.CLAIM, 0.9, 1080, 986),
+        B.CLAIM_ALL: ButtonMatch(B.CLAIM_ALL, 0.95, 1128, 986),
+    }
+
+    controller.update(FRAME, context(state=S.REWARD_CLAIM, frame_state=S.REWARD_CLAIM), WINDOW)
+
+    assert mouse.moves == [(1920 + 1128, 10 + 986, 0.1)]
+    assert notifications(events) == ["Clique em Resgatar tudo para receber as recompensas"]
+    assert outbox_of(controller) == [
+        ("click_required", "Clique em Resgatar tudo para receber as recompensas", "CLAIM_ALL")
+    ]
+    # Ao lado, o aviso cobriria o texto do botão largo ou o botão Equipar.
+    assert controller.status().hint.side == "above"

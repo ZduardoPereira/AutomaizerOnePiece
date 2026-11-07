@@ -59,6 +59,11 @@
         "threshold": 0.75,
         "min_matches": 1
       },
+      "REWARD_CLAIM": {
+        "folder": "reward_claim",
+        "threshold": 0.8,
+        "min_matches": 1
+      },
       "LOBBY": {
         "folder": "lobby",
         "threshold": 0.75,
@@ -105,7 +110,7 @@
     "gold_gate": 0.025
   },
   "assistant": {
-    "enabled": true,
+    "enabled": false,
     "press_escape": true,
     "escape_delay_seconds": 3.0,
     "menu_timeout_seconds": 6.0,

@@ -1,10 +1,12 @@
 import json
 import time
+import urllib.parse
 from datetime import datetime
 
 import numpy as np
 import pytest
 
+from assistant.notification_outbox import CLICK_DONE, CLICK_REQUIRED
 from core.application import Application
 from core.capture import CaptureState
 from core.config import AppConfig, CaptureConfig, RecognitionConfig, SquadConfig, load_config
@@ -15,6 +17,7 @@ from database.models import MonitorControl
 from recognition.interface_detector import Detection
 from recognition.match_detector import MatchResult
 from recognition.reward_detector import RewardEvidence, RewardState
+from whatsapp.notifier import DeliveryState, WhatsAppSettings
 
 
 @pytest.fixture
@@ -33,6 +36,8 @@ def make_application(path):
         rewards_dir=path / "rewards",
         database_path=path / "monitor.db",
         notifications_path=path / "notifications.jsonl",
+        click_counter_path=path / "click_counter.json",
+        whatsapp_path=path / "whatsapp.json",
     )
 
 
@@ -146,9 +151,11 @@ def test_missing_templates_warning_reaches_events(tmp_path, monkeypatch):
         rewards_dir=tmp_path / "rewards",
         database_path=tmp_path / "monitor.db",
         notifications_path=tmp_path / "notifications.jsonl",
+        click_counter_path=tmp_path / "click_counter.json",
+        whatsapp_path=tmp_path / "whatsapp.json",
     )
 
-    messages = [event.message for event in app.events.recent(50, {EventType.RECOGNITION_WARNING})]
+    messages =[event.message for event in app.events.recent(50, {EventType.RECOGNITION_WARNING})]
     app.shutdown()
     assert any("token" in message for message in messages)
     assert any("baús" in message for message in messages)
@@ -489,3 +496,72 @@ def test_shutdown_can_run_twice(tmp_path, no_logging):
     app = make_application(tmp_path)
     app.shutdown()
     app.shutdown()
+
+
+def test_click_counter_counts_only_the_clicks_the_app_writes(application):
+    application.click_counter.poll()  # primeira leitura, com o arquivo ainda inexistente
+    application.outbox.publish(CLICK_REQUIRED, "Clique em Jogar para iniciar outra partida", "PLAY")
+    application.outbox.publish(CLICK_DONE, "Clique feito: Jogar", "PLAY")
+    application.click_counter.poll()
+
+    assert application.click_count().total == 1
+    assert application.click_count().recent[0].message == "Clique feito: Jogar"
+
+    application.reset_click_count()
+    assert application.click_count().total == 0
+
+
+def test_click_written_just_before_closing_is_counted(tmp_path, monkeypatch):
+    monkeypatch.setattr("core.application.configure_logging", lambda *_args: None)
+    app = make_application(tmp_path)
+    app.click_counter.poll()
+    app.outbox.publish(CLICK_DONE, "Clique feito: Resgatar", "CLAIM")
+    app.shutdown()
+
+    saved = json.loads((tmp_path / "click_counter.json").read_text(encoding="utf-8"))
+    assert saved["total_ticks"] == 1
+
+
+WHATSAPP_ON = WhatsAppSettings(enabled=True, phone="+5511912345678", callmebot_api_key="123456")
+
+
+def turn_on_whatsapp(app):
+    """Liga o aviso com um CallMeBot de mentira, que só guarda os pedidos."""
+    requests = []
+
+    def callmebot(request):
+        requests.append(request)
+        return 200, "<p><b>Message queued.</b> You will receive it in a few seconds."
+
+    app.whatsapp._transport = callmebot
+    app.save_whatsapp_settings(WHATSAPP_ON)
+    return requests
+
+
+def test_whatsapp_message_goes_once_when_the_token_is_found(application):
+    requests = turn_on_whatsapp(application)
+    find_token(application)
+
+    application.process_shutdown()
+    application.process_shutdown()
+    application.whatsapp.close()
+
+    assert len(requests) == 1
+    assert "token de recompensa foi encontrado" in urllib.parse.unquote_plus(requests[0].full_url)
+    assert application.whatsapp_status().state is DeliveryState.SENT
+
+
+def test_whatsapp_message_is_not_sent_again_after_reopening(tmp_path, no_logging):
+    app = make_application(tmp_path)
+    first = turn_on_whatsapp(app)
+    find_token(app)
+    app.process_shutdown()
+    app.shutdown()
+
+    reopened = make_application(tmp_path)
+    second = turn_on_whatsapp(reopened)
+    reopened.process_shutdown()
+    reopened.shutdown()
+
+    assert len(first) == 1
+    assert second == []

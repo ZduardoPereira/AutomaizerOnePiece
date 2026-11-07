@@ -10,12 +10,14 @@ from pathlib import Path
 from assistant.mouse_guidance import MouseGuidance
 from assistant.navigation_controller import AssistantStatus, ButtonLocator, NavigationController
 from assistant.notification_outbox import REWARD_OBTAINED, NotificationOutbox
+from click_counter.counter import ClickCount, ClickCounter
 from core.capture import CaptureService, CaptureSnapshot
 from core.config import AppConfig, load_config, save_config
 from core.event_manager import EventManager, EventType
 from core.history_recorder import HistoryRecorder
 from core.logging_setup import configure_logging
 from core.paths import (
+    CLICK_COUNTER_PATH,
     CONFIG_PATH,
     DATABASE_PATH,
     FEEDBACK_DIR,
@@ -23,6 +25,7 @@ from core.paths import (
     NOTIFICATIONS_PATH,
     REWARDS_DIR,
     TEMPLATES_DIR,
+    WHATSAPP_PATH,
 )
 from core.recognition_service import Analysis, RecognitionService, RecognitionSnapshot
 from core.shutdown_manager import FINISHED_MESSAGE, ShutdownManager
@@ -34,6 +37,7 @@ from recognition.hud_reader import HudReader
 from recognition.interface_detector import ScreenDetector
 from recognition.reward_detector import RewardDetector, RewardState, RewardStatus, RewardTracker
 from recognition.squad_detector import SquadDetector
+from whatsapp.notifier import WhatsAppNotifier, WhatsAppSettings, WhatsAppStatus
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +52,8 @@ class Application:
         rewards_dir: Path = REWARDS_DIR,
         database_path: Path = DATABASE_PATH,
         notifications_path: Path = NOTIFICATIONS_PATH,
+        click_counter_path: Path = CLICK_COUNTER_PATH,
+        whatsapp_path: Path = WHATSAPP_PATH,
     ) -> None:
         self._config_path = config_path
         self._logs_dir = logs_dir
@@ -62,6 +68,12 @@ class Application:
         self.events.add_sink(self.history.record_event)
         self.shutdown_manager = ShutdownManager(MonitorControlRepository(self.database), self.events)
         self.outbox = NotificationOutbox(self.config.notifications, notifications_path)
+        # Separado do resto: só lê o arquivo que o outbox escreve, como um programa de fora leria.
+        self.click_counter = ClickCounter(notifications_path, click_counter_path)
+        # Também à parte: só recebe o aviso do token encontrado e manda a mensagem no WhatsApp.
+        self.whatsapp = WhatsAppNotifier(whatsapp_path, self.events)
+        if self.whatsapp.warning:
+            self.events.publish(EventType.CONFIG_WARNING, self.whatsapp.warning)
         if config_warning:
             self.events.publish(EventType.CONFIG_WARNING, config_warning)
         self.capture = CaptureService(self.config.capture, self.events)
@@ -111,7 +123,8 @@ class Application:
         self._closed = False
 
     def start(self) -> None:
-        """Ao abrir, a assistência volta como foi deixada."""
+        """Ao abrir, a assistência volta como foi deixada. O contador de cliques roda sempre, monitorando ou não."""
+        self.click_counter.start()
         if self.config.assistant.enabled:
             self.set_assistant_enabled(True)
 
@@ -147,6 +160,8 @@ class Application:
         if status.token_obtained and not self.shutdown_manager.control.token_obtained:
             self.shutdown_manager.on_token_obtained()
             self.history.mark_token_obtained(status.match_id)
+            # Uma vez por token: token_obtained fica gravado, então reabrir o app não manda de novo.
+            self.whatsapp.notify_token_found(status.detected_at)
         if status.state is RewardState.STOPPED:
             self.shutdown_manager.on_match_over()
         if self.shutdown_manager.complete_if_pending():
@@ -166,6 +181,24 @@ class Application:
 
     def assistant_status(self) -> AssistantStatus:
         return self.assistant.status()
+
+    def click_count(self) -> ClickCount:
+        return self.click_counter.count
+
+    def reset_click_count(self) -> None:
+        self.click_counter.reset()
+
+    def whatsapp_settings(self) -> WhatsAppSettings:
+        return self.whatsapp.settings
+
+    def save_whatsapp_settings(self, settings: WhatsAppSettings) -> None:
+        self.whatsapp.save(settings)
+
+    def send_whatsapp_test(self) -> None:
+        self.whatsapp.send_test()
+
+    def whatsapp_status(self) -> WhatsAppStatus:
+        return self.whatsapp.status
 
     def set_assistant_enabled(self, enabled: bool) -> None:
         """Liga ou desliga o mouse e as notificações. Ligar também inicia o monitoramento, sem o qual ela não vê o jogo."""
@@ -237,6 +270,9 @@ class Application:
         self.assistant.stop()
         self._stop_all()
         self.outbox.close()
+        # Depois do outbox: o último clique gravado ainda é contado.
+        self.click_counter.stop()
+        self.whatsapp.close()
         self.history.close()
         self.database.close()
         logger.info("Aplicativo encerrado")

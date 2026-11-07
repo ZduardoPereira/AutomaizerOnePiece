@@ -14,6 +14,7 @@ _EXPLANATION = (
     "Com a chave Assistência ligada, na lateral, o app guia a próxima partida. No lobby, ele leva o cursor até Jogar. "
     "Se você abrir o menu durante a partida, ele leva o cursor até a aba de configurações e depois até Voltar ao Lobby. "
     "Quando só sobrar você, ele avisa e abre o mesmo caminho. No fim da partida, ele leva o cursor até Jogar novamente. "
+    "Numa tela de recompensa, ele leva o cursor até Resgatar, ou até Resgatar tudo se houver mais de uma. "
     "Em cada passo, você recebe uma notificação com som e um aviso ao lado do botão.\n\n"
     "O clique é sempre seu. O cursor só se move com um menu na tela, nunca durante o jogo. "
     "Para desligar sem usar o app, leve o mouse a um canto da tela."

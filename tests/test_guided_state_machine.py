@@ -21,8 +21,8 @@ from recognition.survival_detector import SquadCondition as C
 ACTIVE_CONFIG = AssistantConfig(press_escape=True, escape_delay_seconds=3, menu_timeout_seconds=6, reminder_seconds=20, max_reminders=2)
 
 
-def match(button):
-    return ButtonMatch(button, 0.95, 100, 200)
+def match(button, x=100, y=200):
+    return ButtonMatch(button, 0.95, x, y)
 
 
 class Scene:
@@ -32,6 +32,7 @@ class Scene:
         self.machine = GuidedStateMachine(config)
         self.context = GuidanceContext(S.IN_MATCH, S.IN_MATCH, False, C.SQUAD_ACTIVE, True, 1, False, True, 0.0)
         self.visible = set()
+        self.positions = {}  # botão: (x, y), quando não for a posição padrão
 
     def set(self, buttons=None, **changes):
         self.context = replace(self.context, **changes)
@@ -41,7 +42,9 @@ class Scene:
 
     def tick(self, seconds=0.5):
         self.context = replace(self.context, now=self.context.now + seconds)
-        return self.machine.update(self.context, lambda b: match(b) if b in self.visible else None)
+        return self.machine.update(
+            self.context, lambda b: match(b, *self.positions.get(b, ())) if b in self.visible else None
+        )
 
     @property
     def step(self):
@@ -711,3 +714,189 @@ def test_unanswered_screens_never_report_a_click():
     for _ in range(100):
         done += clicks_done(scene.tick(1.0))
     assert done == []
+
+
+REWARD = {"state": S.REWARD_CLAIM, "frame_state": S.REWARD_CLAIM, "in_match": False}
+
+
+def reward_screen(buttons):
+    return Scene().set(buttons, **REWARD)
+
+
+def test_single_reward_points_to_claim():
+    scene = reward_screen({B.CLAIM})
+
+    commands = scene.tick()
+
+    assert scene.step is GuidanceStep.CLICK_CLAIM
+    assert moves(commands) == [B.CLAIM]
+    assert messages(commands) == ["Clique em Resgatar para receber a recompensa"]
+    assert buttons_of(commands) == [B.CLAIM]
+    assert scene.machine.confirmation.state is ConfirmationState.WAITING
+
+
+def test_more_than_one_reward_points_to_claim_all():
+    # O texto de Resgatar tudo começa com Resgatar, então os dois podem ser encontrados no mesmo botão.
+    scene = reward_screen({B.CLAIM, B.CLAIM_ALL})
+
+    commands = scene.tick()
+
+    assert scene.step is GuidanceStep.CLICK_CLAIM_ALL
+    assert moves(commands) == [B.CLAIM_ALL]
+    assert messages(commands) == ["Clique em Resgatar tudo para receber as recompensas"]
+
+
+def test_reward_without_the_button_on_screen_keeps_looking_without_moving():
+    scene = reward_screen(set())
+
+    assert scene.tick() == []
+    assert "não será movido" in scene.machine.message
+
+    scene.set({B.CLAIM})
+    assert moves(scene.tick()) == [B.CLAIM]
+
+
+def test_cursor_moves_only_once_per_reward():
+    scene = reward_screen({B.CLAIM})
+    scene.tick()
+
+    for _ in range(10):
+        commands = scene.tick()
+        assert moves(commands) == []
+        assert clicks_done(commands) == []
+    assert scene.step is GuidanceStep.CLICK_CLAIM
+
+
+def test_claiming_the_last_reward_leads_to_play():
+    scene = reward_screen({B.CLAIM_ALL})
+    scene.tick()
+
+    scene.set({B.PLAY}, state=S.LOBBY, frame_state=S.LOBBY)
+    commands = scene.tick()
+
+    assert clicks_done(commands) == [B.CLAIM_ALL]
+    assert scene.step is GuidanceStep.CLICK_PLAY
+    assert moves(commands) == [B.PLAY]
+
+
+def test_next_reward_after_the_animation_is_offered_again():
+    scene = reward_screen({B.CLAIM})
+    scene.tick()
+
+    # Entre uma recompensa e a seguinte, o botão some por alguns quadros, ainda com a tela de recompensa.
+    scene.set(set(), frame_state=S.UNKNOWN)
+    assert clicks_done(scene.tick() + scene.tick()) == []
+    assert scene.step is GuidanceStep.CLICK_CLAIM
+
+    assert clicks_done(scene.tick()) == [B.CLAIM]
+    assert scene.step is GuidanceStep.IDLE
+
+    scene.set({B.CLAIM}, frame_state=S.REWARD_CLAIM)
+    commands = scene.tick()
+    assert scene.step is GuidanceStep.CLICK_CLAIM
+    assert moves(commands) == [B.CLAIM]
+
+
+def test_button_flickering_for_a_frame_is_not_a_click():
+    scene = reward_screen({B.CLAIM})
+    scene.tick()
+
+    scene.set(set())
+    scene.tick()
+    scene.set({B.CLAIM})
+    scene.tick()
+    scene.set(set())
+    scene.tick()
+    scene.set({B.CLAIM})
+
+    assert clicks_done(scene.tick()) == []
+    assert scene.step is GuidanceStep.CLICK_CLAIM
+
+
+def test_reward_replaced_without_a_pause_moves_the_cursor_again():
+    # Uma recompensa sem Equipar mostra Resgatar no centro; a seguinte, com Equipar, à direita.
+    scene = reward_screen({B.CLAIM})
+    scene.positions = {B.CLAIM: (960, 986)}
+    scene.tick()
+
+    scene.positions = {B.CLAIM: (1128, 986)}
+    commands = scene.tick()
+
+    assert clicks_done(commands) == [B.CLAIM]
+    assert moves(commands) == [B.CLAIM]
+    assert scene.machine.button.center_x == 1128
+
+
+def test_claim_all_appearing_after_a_single_claim_is_another_reward():
+    scene = reward_screen({B.CLAIM})
+    scene.tick()
+
+    scene.set({B.CLAIM_ALL})
+    commands = scene.tick()
+
+    assert clicks_done(commands) == [B.CLAIM]
+    assert scene.step is GuidanceStep.CLICK_CLAIM_ALL
+    assert moves(commands) == [B.CLAIM_ALL]
+
+
+def test_small_shifts_of_the_same_button_are_the_same_reward():
+    scene = reward_screen({B.CLAIM})
+    scene.positions = {B.CLAIM: (1128, 986)}
+    scene.tick()
+
+    scene.positions = {B.CLAIM: (1130, 984)}
+
+    assert scene.tick() == []
+
+
+def test_rewards_after_leaving_the_match_come_before_play():
+    scene = Scene()
+    to_waiting_for_menu(scene)
+    in_game_menu(scene, {B.LEAVE_MATCH})
+    scene.tick()
+    scene.set(set(), state=S.LOADING, frame_state=S.LOADING, menu_open=False)
+    scene.tick()
+    assert scene.step is GuidanceStep.WAITING_FOR_LOBBY
+
+    scene.set({B.CLAIM}, **REWARD)
+    commands = scene.tick()
+
+    assert scene.step is GuidanceStep.CLICK_CLAIM
+    assert moves(commands) == [B.CLAIM]
+
+
+def test_reward_right_after_leaving_counts_as_the_click_on_leave():
+    scene = Scene()
+    to_waiting_for_menu(scene)
+    in_game_menu(scene, {B.LEAVE_MATCH})
+    scene.tick()
+
+    scene.set({B.CLAIM}, **REWARD, menu_open=False)
+    commands = scene.tick()
+
+    assert clicks_done(commands) == [B.LEAVE_MATCH]
+    assert scene.step is GuidanceStep.CLICK_CLAIM
+
+
+def test_reward_opening_over_the_lobby_comes_before_play():
+    scene = Scene().set({B.PLAY}, state=S.LOBBY, frame_state=S.LOBBY, in_match=False)
+    scene.tick()
+
+    scene.set({B.CLAIM}, **REWARD)
+    commands = scene.tick()
+
+    assert clicks_done(commands) == []
+    assert scene.step is GuidanceStep.CLICK_CLAIM
+    assert moves(commands) == [B.CLAIM]
+    assert "interrompida" not in scene.machine.message
+
+
+def test_reward_after_the_result_is_not_play_again():
+    scene = Scene().set({B.PLAY_AGAIN}, state=S.MATCH_RESULT, frame_state=S.MATCH_RESULT, in_match=False)
+    scene.tick()
+
+    scene.set({B.CLAIM_ALL}, **REWARD)
+    commands = scene.tick()
+
+    assert clicks_done(commands) == []
+    assert scene.step is GuidanceStep.CLICK_CLAIM_ALL

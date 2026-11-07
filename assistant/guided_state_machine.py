@@ -1,7 +1,8 @@
 """Sequência de orientação: o que o usuário deve clicar a seguir e quando o clique aconteceu.
 
 A sequência para uma nova partida começa sempre que o lobby aparece, o usuário abre o menu durante a partida,
-a partida termina ou só resta o usuário no esquadrão.
+a partida termina ou só resta o usuário no esquadrão. Uma tela de recompensa pede antes o clique em Resgatar,
+ou em Resgatar tudo quando há mais de uma.
 
 Esta classe só decide. Ela nunca clica, nunca inicia partidas e nunca move o personagem: o cursor só é
 movido com um menu na tela, porque durante o jogo o movimento do mouse giraria a câmera. A única tecla
@@ -28,6 +29,10 @@ _MENU_GONE_FRAMES = 3
 # movimento giraria a câmera. Sobre o modo espectador a tela segue como eliminado, por isso a conta é à parte.
 _MENU_SEEN_FRAMES = 2
 _LOBBY_TIMEOUT_SECONDS = 120.0
+# Entre uma recompensa e a seguinte, a tela passa por uma animação sem o botão; por mais quadros, foi resgatada.
+_CLAIM_GONE_FRAMES = 3
+# O botão de resgatar visto mais longe que isso do anterior é outra recompensa: a de antes foi resgatada.
+_SAME_BUTTON_PIXELS = 40
 
 
 class NavigationButton(str, Enum):
@@ -35,6 +40,8 @@ class NavigationButton(str, Enum):
     LEAVE_MATCH = "LEAVE_MATCH"
     PLAY = "PLAY"
     PLAY_AGAIN = "PLAY_AGAIN"
+    CLAIM = "CLAIM"
+    CLAIM_ALL = "CLAIM_ALL"
 
 
 class GuidanceStep(str, Enum):
@@ -46,6 +53,8 @@ class GuidanceStep(str, Enum):
     WAITING_FOR_LOBBY = "WAITING_FOR_LOBBY"
     CLICK_PLAY = "CLICK_PLAY"
     CLICK_PLAY_AGAIN = "CLICK_PLAY_AGAIN"
+    CLICK_CLAIM = "CLICK_CLAIM"
+    CLICK_CLAIM_ALL = "CLICK_CLAIM_ALL"
 
 
 CLICK_MESSAGES = {
@@ -53,12 +62,20 @@ CLICK_MESSAGES = {
     GuidanceStep.CLICK_LEAVE_MATCH: "Clique para retornar ao lobby",
     GuidanceStep.CLICK_PLAY: "Clique em Jogar para iniciar outra partida",
     GuidanceStep.CLICK_PLAY_AGAIN: "Clique em Jogar novamente",
+    GuidanceStep.CLICK_CLAIM: "Clique em Resgatar para receber a recompensa",
+    GuidanceStep.CLICK_CLAIM_ALL: "Clique em Resgatar tudo para receber as recompensas",
 }
 BUTTON_LABELS = {
     NavigationButton.MENU_TAB: "Aba de configurações do menu",
     NavigationButton.LEAVE_MATCH: "Voltar ao Lobby",
     NavigationButton.PLAY: "Jogar",
     NavigationButton.PLAY_AGAIN: "Jogar novamente",
+    NavigationButton.CLAIM: "Resgatar",
+    NavigationButton.CLAIM_ALL: "Resgatar tudo",
+}
+_CLAIM_STEPS = {
+    NavigationButton.CLAIM: GuidanceStep.CLICK_CLAIM,
+    NavigationButton.CLAIM_ALL: GuidanceStep.CLICK_CLAIM_ALL,
 }
 
 
@@ -123,6 +140,8 @@ class GuidedStateMachine:
             GuidanceStep.WAITING_FOR_LOBBY: self._waiting_for_lobby,
             GuidanceStep.CLICK_PLAY: self._click_play,
             GuidanceStep.CLICK_PLAY_AGAIN: self._click_play_again,
+            GuidanceStep.CLICK_CLAIM: self._click_claim,
+            GuidanceStep.CLICK_CLAIM_ALL: self._click_claim,
         }
         self.reset()
 
@@ -138,6 +157,7 @@ class GuidedStateMachine:
         self._cursor_target: ButtonMatch | None = None
         self._menu_gone_frames = 0
         self._menu_seen_frames = 0
+        self._claim_gone_frames = 0
         self._menu_warning_sent = False
         self._searching = False
         self._token_notice_sent = False
@@ -175,6 +195,8 @@ class GuidedStateMachine:
             self._start_leaving(context)
         elif context.state is GameState.MATCH_RESULT:
             self._offer_new_match(GuidanceStep.CLICK_PLAY_AGAIN, NavigationButton.PLAY_AGAIN, context, locate)
+        elif context.state is GameState.REWARD_CLAIM:
+            self._offer_claim(context, locate)
         elif context.state is GameState.LOBBY:
             self._offer_new_match(GuidanceStep.CLICK_PLAY, NavigationButton.PLAY, context, locate)
 
@@ -246,7 +268,7 @@ class GuidedStateMachine:
             self._enter_click(GuidanceStep.CLICK_LEAVE_MATCH, leave, context)
 
     def _click_leave_match(self, context: GuidanceContext, locate: Locate) -> None:
-        if context.state is GameState.LOBBY:
+        if context.state in (GameState.LOBBY, GameState.REWARD_CLAIM):
             self._confirm_click()
             self._finish("Clique confirmado")
             self._idle(context, locate)
@@ -269,7 +291,8 @@ class GuidedStateMachine:
         self.message = "Voltando ao lobby..."
 
     def _waiting_for_lobby(self, context: GuidanceContext, locate: Locate) -> None:
-        if context.state in (GameState.LOBBY, GameState.MATCH_RESULT):
+        # As recompensas da partida aparecem ao chegar ao lobby, antes dele.
+        if context.state in (GameState.LOBBY, GameState.MATCH_RESULT, GameState.REWARD_CLAIM):
             self._finish("")
             self._idle(context, locate)
         elif context.state is GameState.IN_MATCH and context.frame_state is GameState.IN_MATCH:
@@ -296,6 +319,10 @@ class GuidedStateMachine:
         if context.state in _QUEUEING or context.state is GameState.IN_MATCH:
             self._confirm_click()
             self._finish("Clique confirmado")
+        elif context.state is GameState.REWARD_CLAIM:
+            # A recompensa abriu sobre o lobby: ela vem antes de Jogar.
+            self._finish("")
+            self._idle(context, locate)
         elif context.state is not GameState.LOBBY:
             self._finish("A tela mudou: orientação interrompida.")
 
@@ -303,12 +330,53 @@ class GuidedStateMachine:
         if context.state is GameState.MATCHMAKING or context.state is GameState.IN_MATCH:
             self._confirm_click()
             self._finish("Clique confirmado")
-        elif context.state is GameState.LOBBY or context.state is GameState.LOADING:
+        elif context.state in (GameState.LOBBY, GameState.LOADING, GameState.REWARD_CLAIM):
             # Jogar novamente vai direto para a fila: daqui, o usuário escolheu Retornar ao lobby.
             self._finish("")
             self._idle(context, locate)
         elif context.state is not GameState.MATCH_RESULT:
             self._finish("A tela mudou: orientação interrompida.")
+
+    def _offer_claim(self, context: GuidanceContext, locate: Locate) -> None:
+        match = self._locate_claim(locate)
+        if match is None:
+            self._searching = True
+            self.message = f"Procurando o botão {BUTTON_LABELS[NavigationButton.CLAIM]}. O mouse não será movido."
+            return
+        self._enter_click(_CLAIM_STEPS[match.button], match, context)
+
+    @staticmethod
+    def _locate_claim(locate: Locate) -> ButtonMatch | None:
+        """Resgatar tudo vem primeiro: o jogo só o mostra com mais de uma recompensa, e o texto dele começa com Resgatar."""
+        claim_all = locate(NavigationButton.CLAIM_ALL)
+        return claim_all if claim_all is not None else locate(NavigationButton.CLAIM)
+
+    def _click_claim(self, context: GuidanceContext, locate: Locate) -> None:
+        if context.state is not GameState.REWARD_CLAIM:
+            self._confirm_click()
+            self._finish("Clique confirmado")
+            self._idle(context, locate)
+            return
+        match = self._locate_claim(locate)
+        if match is None:
+            self._claim_gone_frames += 1
+            if self._claim_gone_frames >= _CLAIM_GONE_FRAMES:
+                self._confirm_click()
+                self._finish("Clique confirmado")
+            return
+        self._claim_gone_frames = 0
+        if self._is_another_reward(match):
+            self._confirm_click()
+            self._enter_click(_CLAIM_STEPS[match.button], match, context)
+
+    def _is_another_reward(self, match: ButtonMatch) -> bool:
+        current = self.button
+        return (
+            current is None
+            or match.button is not current.button
+            or abs(match.center_x - current.center_x) > _SAME_BUTTON_PIXELS
+            or abs(match.center_y - current.center_y) > _SAME_BUTTON_PIXELS
+        )
 
     def _menu_still_open(self, context: GuidanceContext) -> bool:
         if context.menu_open:
@@ -326,6 +394,7 @@ class GuidedStateMachine:
         self._cursor_target = None
         self._step_started_at = context.now
         self._menu_gone_frames = 0
+        self._claim_gone_frames = 0
         self._menu_warning_sent = False
         if self.confirmation.state is ConfirmationState.WAITING:
             self.confirmation.clear()

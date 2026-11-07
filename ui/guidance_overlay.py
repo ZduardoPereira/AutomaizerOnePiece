@@ -24,7 +24,7 @@ _SWP_NOSIZE = 0x0001
 _SWP_NOACTIVATE = 0x0010
 _SWP_SHOWWINDOW = 0x0040
 _WDA_EXCLUDEFROMCAPTURE = 0x00000011
-_ARROWS = {"left": "{text}  ▶", "right": "◀  {text}", "below": "▲  {text}"}
+_ARROWS = {"left": "{text}  ▶", "right": "◀  {text}", "below": "▲  {text}", "above": "▼  {text}"}
 # O cartão fica à direita, abaixo do minimapa, onde não cobre os elementos que o jogador mais usa.
 _CARD_TOP = 300
 _CARD_RIGHT_MARGIN = 30
@@ -58,6 +58,8 @@ def hint_position(hint: GuidanceHint, width: int, height: int) -> tuple[int, int
         return hint.x - width - 3 * _MARGIN, hint.y - height // 2
     if hint.side == "right":
         return hint.x + 3 * _MARGIN, hint.y - height // 2
+    if hint.side == "above":
+        return hint.x - width // 2, hint.y - height - _MARGIN
     return hint.x - width // 2, hint.y + _MARGIN
 
 

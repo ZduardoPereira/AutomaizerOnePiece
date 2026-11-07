@@ -11,6 +11,7 @@ from core.application import Application
 from core.event_manager import AppEvent, EventType
 from ui import theme
 from ui.assistant import AssistantPage
+from ui.click_counter import ClickCounterPage
 from ui.dashboard import DashboardPage
 from ui.formatting import assistance_state_text, fortnite_status
 from ui.guidance_overlay import GuidanceOverlay, NotificationCards
@@ -18,6 +19,7 @@ from ui.history import HistoryPage
 from ui.monitoring import MonitoringPage
 from ui.rewards import RewardsPage
 from ui.settings import SettingsPage
+from ui.whatsapp import WhatsAppPage
 from ui.widgets import Page
 
 logger = logging.getLogger(__name__)
@@ -29,6 +31,8 @@ _PAGES: dict[str, type[Page]] = {
     "Assistente": AssistantPage,
     "Recompensas": RewardsPage,
     "Histórico": HistoryPage,
+    "Cliques": ClickCounterPage,
+    "WhatsApp": WhatsAppPage,
     "Configurações": SettingsPage,
 }
 

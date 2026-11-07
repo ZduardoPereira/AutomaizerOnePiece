@@ -38,6 +38,8 @@ _TEMPLATE_FILES = {
     NavigationButton.LEAVE_MATCH: "voltar_ao_lobby.png",
     NavigationButton.PLAY: "jogar.png",
     NavigationButton.PLAY_AGAIN: "jogar_novamente.png",
+    NavigationButton.CLAIM: "resgatar.png",
+    NavigationButton.CLAIM_ALL: "resgatar_tudo.png",
 }
 # De que lado do botão o aviso aparece, sem cobrir o botão nem os recortes que identificam a tela.
 _HINT_SIDES = {
@@ -45,6 +47,9 @@ _HINT_SIDES = {
     NavigationButton.LEAVE_MATCH: "left",
     NavigationButton.PLAY: "right",
     NavigationButton.PLAY_AGAIN: "left",
+    # Largo e no rodapé: ao lado, o aviso cobriria o texto do botão; ao lado de Resgatar fica Equipar.
+    NavigationButton.CLAIM: "above",
+    NavigationButton.CLAIM_ALL: "above",
 }
 
 
